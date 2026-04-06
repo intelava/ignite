@@ -174,7 +174,7 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
     Examples:
         .. code-block:: python
 
-            import ignite.distributed as idist
+            import ignite.distribted as idist
 
             model = idist.auto_model(model)
 
@@ -182,7 +182,7 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
 
         .. code-block:: python
 
-            import ignite.distributed as idist
+            import ignite.distribted as idist
 
             model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
             model = idist.auto_model(model)
@@ -217,8 +217,6 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
     .. versionchanged:: 0.4.3
         Added kwargs to ``idist.auto_model``.
 
-    .. versionchanged:: 0.5.5
-        Added ``use_fsdp`` argument.
     """
     logger = setup_logger(__name__ + ".auto_model")
 
