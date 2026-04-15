@@ -19,6 +19,7 @@ from ignite.utils import setup_logger
 
 try:
     from torch.distributed._composable.fsdp import fully_shard
+    from torch.distributed.device_mesh import init_device_mesh
 
     HAVE_FSDP2 = True
 except ImportError:
@@ -247,6 +248,8 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
                     raise RuntimeError(
                         "fully_shard (FSDP2) is not available. Please upgrade to PyTorch >= 2.0."
                     )
+                if "mesh" not in kwargs:
+                    kwargs["mesh"] = init_device_mesh(device.type, (idist.get_world_size(),))
                 logger.info("Apply torch FSDP2 (fully_shard) on model")
                 model = fully_shard(model, **kwargs)
             else:
