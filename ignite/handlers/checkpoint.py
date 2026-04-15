@@ -20,12 +20,12 @@ else:
     HAVE_ZERO = False
 
 try:
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-    from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+    from torch.distributed._composable.fsdp import FSDPModule
+    from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict, set_model_state_dict
 
-    HAVE_FSDP = True
+    HAVE_FSDP2 = True
 except ImportError:
-    HAVE_FSDP = False
+    HAVE_FSDP2 = False
 
 import ignite.distributed as idist
 from ignite.base import Serializable
@@ -539,10 +539,10 @@ class Checkpoint(Serializable):
             def func(obj: Any, **kwargs: Any) -> dict:
                 if isinstance(obj, (nn.DataParallel, nn.parallel.DistributedDataParallel)):
                     obj = obj.module
-                elif HAVE_FSDP and isinstance(obj, FSDP):
-                    cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-                    with FSDP.state_dict_type(obj, StateDictType.FULL_STATE_DICT, cfg):
-                        state_dict = obj.state_dict()
+                elif HAVE_FSDP2 and isinstance(obj, FSDPModule):
+                    state_dict = get_model_state_dict(
+                        obj, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+                    )
                     if idist.get_rank() != self.save_on_rank:
                         return {}
                     return state_dict
@@ -664,13 +664,12 @@ class Checkpoint(Serializable):
         Note:
             If ``to_load`` contains objects of type torch `DistributedDataParallel`_ or
             `DataParallel`_, method ``load_state_dict`` will applied to their internal wrapped model (``obj.module``).
-            If ``to_load`` contains objects of type `FullyShardedDataParallel`_, ``load_state_dict`` is applied using
-            ``FULL_STATE_DICT`` mode so that all ranks correctly receive the sharded parameters.
+            If ``to_load`` contains FSDP2-sharded objects (``FSDPModule``), ``set_model_state_dict``
+            is used with ``full_state_dict=True`` so that all ranks correctly receive the sharded parameters.
 
         .. _DistributedDataParallel: https://pytorch.org/docs/stable/generated/
             torch.nn.parallel.DistributedDataParallel.html
         .. _DataParallel: https://pytorch.org/docs/stable/generated/torch.nn.DataParallel.html
-        .. _FullyShardedDataParallel: https://pytorch.org/docs/stable/fsdp.html
         """
         if not isinstance(checkpoint, (Mapping, str, Path)):
             raise TypeError(f"Argument checkpoint should be a string or a dictionary, but given {type(checkpoint)}")
@@ -685,9 +684,8 @@ class Checkpoint(Serializable):
         def _load_object(obj: Any, chkpt_obj: Any) -> None:
             if isinstance(obj, (nn.DataParallel, nn.parallel.DistributedDataParallel)):
                 obj = obj.module
-            elif HAVE_FSDP and isinstance(obj, FSDP):
-                with FSDP.state_dict_type(obj, StateDictType.FULL_STATE_DICT):
-                    obj.load_state_dict(chkpt_obj, **kwargs)
+            elif HAVE_FSDP2 and isinstance(obj, FSDPModule):
+                set_model_state_dict(obj, chkpt_obj, options=StateDictOptions(full_state_dict=True))
                 return
 
             if isinstance(obj, torch.nn.Module):

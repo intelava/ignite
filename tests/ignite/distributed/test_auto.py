@@ -233,13 +233,13 @@ def test_auto_methods_nccl(distributed_context_single_node_nccl):
 
 def _test_auto_model_fsdp(model, ws, device):
     try:
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed._composable.fsdp import FSDPModule
     except ImportError:
-        pytest.skip("FSDP not available in this PyTorch version")
+        pytest.skip("FSDP2 not available in this PyTorch version")
 
     wrapped = auto_model(model, use_fsdp=True)
     if ws > 1 and idist.has_native_dist_support and idist.backend() in ("nccl", "gloo"):
-        assert isinstance(wrapped, FSDP), f"Expected FSDP, got {type(wrapped)}"
+        assert isinstance(wrapped, FSDPModule), f"Expected FSDPModule, got {type(wrapped)}"
     else:
         assert isinstance(wrapped, nn.Module)
 
@@ -266,7 +266,7 @@ def test_auto_model_fsdp_gloo(distributed_context_single_node_gloo):
 @pytest.mark.skipif(not idist.has_native_dist_support, reason="Skip if no native dist support")
 @pytest.mark.skipif(torch.cuda.device_count() < 1, reason="Skip if no GPU")
 @pytest.mark.skipif("WORLD_SIZE" not in os.environ, reason="Skip if WORLD_SIZE not in env vars")
-def test_auto_model_fsdp_nccl(distributed_context_single_node_nccl):
+def test_auto_model_fsdp_nccl_cuda(distributed_context_single_node_nccl):
     ws = distributed_context_single_node_nccl["world_size"]
     device = idist.device()
     _test_auto_model_fsdp(nn.Linear(10, 10), ws, device)

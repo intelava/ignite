@@ -1,7 +1,7 @@
 """
 Smoke tests for FSDP support changes in:
   - ignite/distributed/auto.py  (auto_model use_fsdp parameter)
-  - ignite/handlers/checkpoint.py (HAVE_FSDP flag and FSDP checkpoint branch)
+  - ignite/handlers/checkpoint.py (HAVE_FSDP2 flag and FSDP checkpoint branch)
 
 All tests run in single-process / non-distributed mode.
 """
@@ -143,22 +143,22 @@ class TestAutoModelFSDPFlag:
 # ---------------------------------------------------------------------------
 
 class TestCheckpointFSDPImports:
-    """Verify the HAVE_FSDP flag and associated symbols are importable."""
+    """Verify the HAVE_FSDP2 flag and associated symbols are importable."""
 
     def test_have_fsdp_is_true(self) -> None:
-        """HAVE_FSDP must be True when torch.distributed.fsdp is present."""
-        from ignite.handlers.checkpoint import HAVE_FSDP
+        """HAVE_FSDP2 must be True when torch.distributed._composable.fsdp is present."""
+        from ignite.handlers.checkpoint import HAVE_FSDP2
 
-        assert HAVE_FSDP is True, (
-            "HAVE_FSDP is False — torch.distributed.fsdp may be unavailable in this environment"
+        assert HAVE_FSDP2 is True, (
+            "HAVE_FSDP2 is False — torch.distributed._composable.fsdp may be unavailable in this environment"
         )
 
-    def test_fsdp_class_importable_from_checkpoint_module(self) -> None:
-        """FSDP, FullStateDictConfig and StateDictType must be reachable."""
+    def test_fsdp2_symbols_importable_from_checkpoint_module(self) -> None:
+        """FSDPModule, get_model_state_dict and set_model_state_dict must be reachable."""
         # checkpoint.py imports these at module level inside the try/except;
         # confirm they are accessible from the installed torch build.
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP  # noqa: F401
-        from torch.distributed.fsdp import FullStateDictConfig, StateDictType  # noqa: F401
+        from torch.distributed._composable.fsdp import FSDPModule  # noqa: F401
+        from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict, set_model_state_dict  # noqa: F401
 
     def test_checkpoint_module_imports_cleanly(self) -> None:
         """The checkpoint module itself must import without errors."""
@@ -360,10 +360,10 @@ class TestEdgeCases:
         assert isinstance(result, nn.Module)
 
     def test_have_fsdp_flag_is_boolean(self) -> None:
-        """HAVE_FSDP must be a plain Python bool (not None or a module)."""
-        from ignite.handlers.checkpoint import HAVE_FSDP
+        """HAVE_FSDP2 must be a plain Python bool (not None or a module)."""
+        from ignite.handlers.checkpoint import HAVE_FSDP2
 
-        assert isinstance(HAVE_FSDP, bool)
+        assert isinstance(HAVE_FSDP2, bool)
 
     def test_setup_checkpoint_returns_dict_for_plain_model(self) -> None:
         """_setup_checkpoint on a non-FSDP model must return a non-empty dict."""

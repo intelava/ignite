@@ -1250,18 +1250,17 @@ def _test_checkpoint_load_objects_ddp(device):
 
 
 def _test_checkpoint_with_fsdp(device, dirname):
-    from ignite.handlers.checkpoint import HAVE_FSDP
+    from ignite.handlers.checkpoint import HAVE_FSDP2
 
-    if not HAVE_FSDP or "cuda" not in device.type:
+    if not HAVE_FSDP2 or "cuda" not in device.type:
         return
 
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
+    from torch.distributed._composable.fsdp import fully_shard
 
     torch.manual_seed(0)
-    local_rank = idist.get_local_rank()
     model = DummyModel().to(device)
-    fsdp_model = FSDP(model, device_id=local_rank)
-    to_save = {"model": fsdp_model}
+    fully_shard(model)
+    to_save = {"model": model}
 
     saver = DiskSaver(str(dirname), create_dir=True, require_empty=False)
     checkpointer = Checkpoint(to_save, saver)
@@ -1279,38 +1278,39 @@ def _test_checkpoint_with_fsdp(device, dirname):
 
 
 def _test_checkpoint_load_objects_fsdp(device):
-    from ignite.handlers.checkpoint import HAVE_FSDP
+    from ignite.handlers.checkpoint import HAVE_FSDP2
 
-    if not HAVE_FSDP or "cuda" not in device.type:
+    if not HAVE_FSDP2 or "cuda" not in device.type:
         return
 
-    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType, FullStateDictConfig
+    from torch.distributed._composable.fsdp import fully_shard
+    from torch.distributed.checkpoint.state_dict import StateDictOptions, get_model_state_dict, set_model_state_dict
 
     def _full_state(m):
-        cfg = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        with FSDP.state_dict_type(m, StateDictType.FULL_STATE_DICT, cfg):
-            return {k: v.clone() for k, v in m.state_dict().items()}
+        return {
+            k: v.clone()
+            for k, v in get_model_state_dict(
+                m, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+            ).items()
+        }
 
     torch.manual_seed(0)
-    local_rank = idist.get_local_rank()
     model = DummyModel().to(device)
-    fsdp_model = FSDP(model, device_id=local_rank)
-    original_state = _full_state(fsdp_model)
+    fully_shard(model)
+    original_state = _full_state(model)
 
-    # Perturb weights, then reload the original state dict
+    # Perturb weights, then reload the original state dict via Checkpoint.load_objects
     perturbed = {k: v + 99.0 for k, v in original_state.items()}
-    cfg2 = FullStateDictConfig(offload_to_cpu=False, rank0_only=False)
-    with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT, cfg2):
-        fsdp_model.load_state_dict(perturbed)
+    set_model_state_dict(model, perturbed, options=StateDictOptions(full_state_dict=True))
 
-    Checkpoint.load_objects({"model": fsdp_model}, original_state)
+    Checkpoint.load_objects({"model": model}, original_state)
 
     # After loading, weights should match the original
-    after = _full_state(fsdp_model)
+    after = _full_state(model)
     if idist.get_rank() == 0:
         for k in original_state:
             assert torch.allclose(original_state[k].cpu(), after[k].cpu()), (
-                f"Mismatch on param '{k}' after FSDP checkpoint load"
+                f"Mismatch on param '{k}' after FSDP2 checkpoint load"
             )
 
 

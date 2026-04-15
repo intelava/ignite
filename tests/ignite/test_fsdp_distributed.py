@@ -24,15 +24,20 @@ def run_worker(rank: int, world_size: int, backend: str, results: dict) -> None:
 
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
+    if torch.cuda.is_available():
+        torch.cuda.set_device(rank)
+
     try:
         import ignite.distributed as idist
         from ignite.distributed.auto import auto_model
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed._composable.fsdp import FSDPModule
 
-        # Test 1: use_fsdp=True wraps with FSDP when world_size > 1
-        model = nn.Linear(10, 10)
+        device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
+
+        # Test 1: use_fsdp=True applies FSDP2 when world_size > 1
+        model = nn.Linear(10, 10).to(device)
         wrapped = auto_model(model, use_fsdp=True)
-        assert isinstance(wrapped, FSDP), f"[rank {rank}] Expected FSDP, got {type(wrapped).__name__}"
+        assert isinstance(wrapped, FSDPModule), f"[rank {rank}] Expected FSDPModule, got {type(wrapped).__name__}"
         results[f"rank{rank}_fsdp_wrap"] = True
 
         # Test 2: use_fsdp=True + sync_bn=True raises ValueError (all ranks)
@@ -43,7 +48,7 @@ def run_worker(rank: int, world_size: int, backend: str, results: dict) -> None:
             results[f"rank{rank}_valueerror"] = True
 
         # Test 3: forward pass through FSDP-wrapped model works
-        x = torch.randn(4, 10)
+        x = torch.randn(4, 10, device=device)
         out = wrapped(x)
         assert out.shape == (4, 10), f"[rank {rank}] Unexpected output shape: {out.shape}"
         results[f"rank{rank}_forward"] = True
@@ -72,21 +77,21 @@ def run_checkpoint_worker(rank: int, world_size: int, backend: str, tmpdir: str,
         from ignite.handlers import Checkpoint, DiskSaver
         from ignite.engine import Engine, Events
         from ignite.engine.engine import State
-        from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+        from torch.distributed._composable.fsdp import fully_shard
 
         torch.manual_seed(0)
         device = torch.device(f"cuda:{rank}" if torch.cuda.is_available() else "cpu")
         if torch.cuda.is_available():
             torch.cuda.set_device(rank)
         model = nn.Sequential(nn.Linear(8, 8), nn.ReLU()).to(device)
-        fsdp_model = FSDP(model, device_id=rank if torch.cuda.is_available() else None)
+        fully_shard(model)
 
         save_dir = os.path.join(tmpdir, "fsdp_ckpt")
         os.makedirs(save_dir, exist_ok=True)
         dist.barrier()
 
         checkpointer = Checkpoint(
-            {"model": fsdp_model},
+            {"model": model},
             DiskSaver(save_dir, create_dir=False, require_empty=False),
         )
         engine = Engine(lambda e, b: None)

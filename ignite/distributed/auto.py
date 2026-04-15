@@ -17,6 +17,13 @@ from ignite.distributed.comp_models import native as idist_native
 from ignite.distributed.comp_models import xla as idist_xla
 from ignite.utils import setup_logger
 
+try:
+    from torch.distributed._composable.fsdp import fully_shard
+
+    HAVE_FSDP2 = True
+except ImportError:
+    HAVE_FSDP2 = False
+
 __all__ = ["auto_dataloader", "auto_model", "auto_optim", "DistributedProxySampler"]
 
 
@@ -149,7 +156,7 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
 
     - send model to current :meth:`~ignite.distributed.utils.device()` if model's parameters are not on the device.
     - wrap the model to `torch DistributedDataParallel`_ for native torch distributed if world size is larger than 1.
-    - wrap the model to `torch FullyShardedDataParallel`_ instead of DDP if ``use_fsdp=True`` and native torch
+    - wrap the model with `torch FSDP2 fully_shard`_ instead of DDP if ``use_fsdp=True`` and native torch
       distributed is used with world size larger than 1.
     - wrap the model to `torch DataParallel`_ if no distributed context found and more than one CUDA devices available.
     - broadcast the initial variable states from rank 0 to all other processes if Horovod distributed framework is used.
@@ -159,14 +166,15 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
         sync_bn: if True, applies `torch convert_sync_batchnorm`_ to the model for native torch
             distributed only. Default, False. Note, if using Nvidia/Apex, batchnorm conversion should be
             applied before calling ``amp.initialize``. Incompatible with ``use_fsdp=True``.
-        use_fsdp: if True, wraps the model with `torch FullyShardedDataParallel`_ instead of
+        use_fsdp: if True, applies `torch FSDP2 fully_shard`_ to the model instead of wrapping with
             ``DistributedDataParallel`` for native torch distributed backends (NCCL, GLOO, MPI).
-            Default, False. When enabled, ``kwargs`` are forwarded to the FSDP constructor, allowing
-            full control over ``sharding_strategy``, ``mixed_precision``, ``cpu_offload``,
-            ``auto_wrap_policy``, etc. Requires PyTorch >= 1.12.
-        kwargs: kwargs to model's wrapping class: `torch DistributedDataParallel`_,
-            `torch FullyShardedDataParallel`_ (when ``use_fsdp=True``), or `torch DataParallel`_
-            if applicable. Please, make sure to use acceptable kwargs for given backend.
+            Default, False. When enabled, ``kwargs`` are forwarded to ``fully_shard()``, allowing
+            control over ``reshard_after_forward``, ``mp_policy``, ``offload_policy``, etc.
+            Note: FSDP2 does not support ``auto_wrap_policy``; manually call ``fully_shard()`` on
+            submodules before passing the model to ``auto_model``. Requires PyTorch >= 2.0.
+        kwargs: kwargs forwarded to the wrapping class: `torch DistributedDataParallel`_,
+            `torch FSDP2 fully_shard`_ (when ``use_fsdp=True``), or `torch DataParallel`_
+            if applicable. Please, make sure to use acceptable kwargs for the given backend.
 
     Returns:
         torch.nn.Module
@@ -187,24 +195,26 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
             model, optimizer = amp.initialize(model, optimizer, opt_level=opt_level)
             model = idist.auto_model(model)
 
-        To use FSDP with bf16 mixed precision:
+        To use FSDP2 with bf16 mixed precision:
 
         .. code-block:: python
 
             import torch
             import ignite.distributed as idist
-            from torch.distributed.fsdp import MixedPrecision
+            from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 
-            bf16_policy = MixedPrecision(
+            bf16_policy = MixedPrecisionPolicy(
                 param_dtype=torch.bfloat16,
                 reduce_dtype=torch.bfloat16,
-                buffer_dtype=torch.bfloat16,
             )
-            model = idist.auto_model(model, use_fsdp=True, mixed_precision=bf16_policy)
+            # Optionally shard submodules first:
+            for layer in model.layers:
+                fully_shard(layer)
+            model = idist.auto_model(model, use_fsdp=True, mp_policy=bf16_policy)
 
     .. _torch DistributedDataParallel: https://pytorch.org/docs/stable/generated/torch.nn.parallel.
         DistributedDataParallel.html
-    .. _torch FullyShardedDataParallel: https://pytorch.org/docs/stable/fsdp.html
+    .. _torch FSDP2 fully_shard: https://pytorch.org/docs/stable/distributed.fsdp2.html
     .. _torch DataParallel: https://pytorch.org/docs/stable/generated/torch.nn.DataParallel.html
     .. _torch convert_sync_batchnorm: https://pytorch.org/docs/stable/generated/torch.nn.SyncBatchNorm.html#
         torch.nn.SyncBatchNorm.convert_sync_batchnorm
@@ -233,15 +243,12 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
         bnd = idist.backend()
         if idist.has_native_dist_support and bnd in (idist_native.NCCL, idist_native.GLOO, idist_native.MPI):
             if use_fsdp:
-                try:
-                    from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-                except ImportError:
+                if not HAVE_FSDP2:
                     raise RuntimeError(
-                        "FullyShardedDataParallel (FSDP) is not available. "
-                        "Please upgrade to PyTorch >= 1.12."
+                        "fully_shard (FSDP2) is not available. Please upgrade to PyTorch >= 2.0."
                     )
-                logger.info("Apply torch FullyShardedDataParallel on model")
-                model = FSDP(model, **kwargs)
+                logger.info("Apply torch FSDP2 (fully_shard) on model")
+                model = fully_shard(model, **kwargs)
             else:
                 if sync_bn:
                     logger.info("Convert batch norm to sync batch norm")
