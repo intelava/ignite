@@ -12,7 +12,9 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 
-sys.path.insert(0, "/pfss/mlde/workspaces/mlde_wsp_MazaheriA/tk27ryru/ignite")
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 
 
 def run_worker(rank: int, world_size: int, backend: str, results: dict) -> None:
@@ -28,7 +30,6 @@ def run_worker(rank: int, world_size: int, backend: str, results: dict) -> None:
         torch.cuda.set_device(rank)
 
     try:
-        import ignite.distributed as idist
         from ignite.distributed.auto import auto_model
         from torch.distributed._composable.fsdp import FSDPModule
 
@@ -73,7 +74,6 @@ def run_checkpoint_worker(rank: int, world_size: int, backend: str, tmpdir: str,
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
     try:
-        import ignite.distributed as idist
         from ignite.handlers import Checkpoint, DiskSaver
         from ignite.engine import Engine, Events
         from ignite.engine.engine import State

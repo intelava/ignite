@@ -115,7 +115,6 @@ class TestAutoModelFSDPFlag:
         same device as the wrapped model to forward correctly.
         """
         from ignite.distributed.auto import auto_model
-        import ignite.distributed as idist
 
         torch.manual_seed(0)
         model = _SimpleLinear()
@@ -355,8 +354,9 @@ class TestEdgeCases:
         from ignite.distributed.auto import auto_model
 
         model = _SimpleLinear()
-        # In non-dist mode, FSDP is not instantiated so kwargs are irrelevant.
-        result = auto_model(model, use_fsdp=True)
+        # In non-dist mode, FSDP is not instantiated, so representative FSDP kwargs
+        # such as ``reshard_after_forward`` should be accepted and ignored.
+        result = auto_model(model, use_fsdp=True, reshard_after_forward=False)
         assert isinstance(result, nn.Module)
 
     def test_have_fsdp_flag_is_boolean(self) -> None:

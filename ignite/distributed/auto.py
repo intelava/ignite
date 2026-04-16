@@ -246,7 +246,13 @@ def auto_model(model: nn.Module, sync_bn: bool = False, use_fsdp: bool = False, 
             if use_fsdp:
                 if not HAVE_FSDP2:
                     raise RuntimeError(
-                        "fully_shard (FSDP2) is not available. Please upgrade to PyTorch >= 2.0."
+                        "fully_shard (FSDP2) is not available. Please upgrade to PyTorch >= 2.6."
+                    )
+                ddp_only_kwargs = {"device_ids", "output_device", "find_unused_parameters", "gradient_as_bucket_view"}
+                bad_kwargs = ddp_only_kwargs & set(kwargs)
+                if bad_kwargs:
+                    raise ValueError(
+                        f"Argument(s) {bad_kwargs} are DDP-only and cannot be used with use_fsdp=True."
                     )
                 if "mesh" not in kwargs:
                     kwargs["mesh"] = init_device_mesh(device.type, (idist.get_world_size(),))

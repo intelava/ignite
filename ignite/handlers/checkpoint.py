@@ -413,7 +413,7 @@ class Checkpoint(Serializable):
                 with_score=self.score_function is not None,
                 with_score_name=self.score_name is not None,
                 with_global_step=global_step is not None,
-                with_ext=bool(self.ext),
+                as_folder=not self.ext,
             )
         else:
             filename_pattern = self.filename_pattern
@@ -569,7 +569,7 @@ class Checkpoint(Serializable):
         with_score: bool = True,
         with_score_name: bool = True,
         with_global_step: bool = True,
-        with_ext: bool = True,
+        as_folder: bool = False,
     ) -> str:
         """Helper method to get the default filename pattern for a checkpoint.
 
@@ -584,6 +584,8 @@ class Checkpoint(Serializable):
             with_global_step: If True, ``{global_step}`` is added to the
                 filename pattern: ``...{name}_{global_step}...``.
                 At least one of ``with_score`` and ``with_global_step`` should be True.
+            as_folder: If True, the ``.{ext}`` suffix is omitted from the pattern, producing a
+                bare name suitable for directory-based (DCP) checkpoints. Default, False.
 
         Examples:
             .. code-block:: python
@@ -615,7 +617,7 @@ class Checkpoint(Serializable):
         if with_prefix:
             filename_pattern = "{filename_prefix}_" + filename_pattern
 
-        if with_ext:
+        if not as_folder:
             filename_pattern += ".{ext}"
         return filename_pattern
 
@@ -699,12 +701,16 @@ class Checkpoint(Serializable):
                     )
                 state_dicts = {}
                 for k, obj in to_load.items():
+                    if isinstance(obj, (nn.DataParallel, nn.parallel.DistributedDataParallel)):
+                        obj = obj.module
                     if isinstance(obj, FSDPModule):
                         state_dicts[k] = get_model_state_dict(obj)
                     else:
                         state_dicts[k] = obj.state_dict()
                 dcp.load(state_dicts, storage_reader=FileSystemReader(checkpoint_path))
                 for k, obj in to_load.items():
+                    if isinstance(obj, (nn.DataParallel, nn.parallel.DistributedDataParallel)):
+                        obj = obj.module
                     if isinstance(obj, FSDPModule):
                         set_model_state_dict(obj, state_dicts[k])
                     else:
